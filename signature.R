@@ -51,12 +51,13 @@ specgram_new <- function(x, n = min(256, length(x)), Fs = 2, window = hanning(n)
   S = mvfft(S)
   
   ## extract the positive frequency components
-  if (n %% 2 == 1)
+  if (n %% 2 == 1){
     ret_n = (n + 1) / 2
-  else
+    }
+  else{
     ret_n = n / 2
-  S = S[1:ret_n,]
-  
+    S = S[1:ret_n,]
+  }
   f = ((0:(ret_n - 1)) / n) * Fs   #fixed code, prevent integer overflow
   t = offset / Fs
   
