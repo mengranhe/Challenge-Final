@@ -19,4 +19,4 @@ command line driver for task listing song information
 **shazam_identify.R**
 command line driver for tasking identifying audio file (.mp3 and .wav format)
 
-`source(psqlConnet.R)` is to load library(RpostgreSQL) and log into server
+`source(psqlConnet.R)` is to load library(RpostgreSQL), log into server and define variable song_data containing all the songs' signatures. 
