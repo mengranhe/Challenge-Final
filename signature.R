@@ -3,9 +3,103 @@ suppressMessages(library(tuneR))
 suppressMessages(library(signal))
 suppressMessages(library(xts))
 
+####################
+# factor functions #
+####################
+
+#normalize periodogram by the max element
+normPower <- function(x) {
+  value <-  x / max(x)
+  return(value)
+}
+
+#factor function of song_signature():
+#windowing: use specgram() source code, but changed a line of code inside, in order to prevent integer overflow 
+specgram_new <- function(x, n = min(256, length(x)), Fs = 2, window = hanning(n), overlap = length(window) / 2)  {
+  ## if only the window length is given, generate hanning window
+  if (length(window) == 1){
+    window = hanning(window)
+  }
+  ## should be extended to accept a vector of frequencies at which to
+  ## evaluate the fourier transform (via filterbank or chirp
+  ## z-transform)
+  if (length(n) > 1)
+    stop("specgram does not handle frequency vectors yet")
+  
+  ## compute window offsets
+  win_size = length(window)
+  if (win_size > n) {
+    n = win_size
+    warning("specgram fft size adjusted to", n)
+  }
+  step = win_size - overlap
+  
+  ## build matrix of windowed data slices
+  if (length(x) > win_size){
+    offset = seq(1, length(x) - win_size, by = step)
+  }
+  else{
+    offset = 1
+    S = matrix(0, n, length(offset))
+  }
+  
+  for (i in 1:length(offset)) {
+    S[1:win_size, i] = x[offset[i]:(offset[i] + win_size - 1)] * window
+  }
+  
+  ## compute fourier transform
+  S = mvfft(S)
+  
+  ## extract the positive frequency components
+  if (n %% 2 == 1)
+    ret_n = (n + 1) / 2
+  else
+    ret_n = n / 2
+  S = S[1:ret_n,]
+  
+  f = ((0:(ret_n - 1)) / n) * Fs   #fixed code, prevent integer overflow
+  t = offset / Fs
+  
+  res = list(S = S, f = f, t = t)
+  class(res) = "specgram"
+  res
+}
+
+
+#factor function of make_peak_signature(): find all the peaks along the periodogram and return the indices of peaks
+find_peak_indices <- function(powerspec, thresh = 5){
+  shape <- diff(sign(diff(powerspec, na.pad = FALSE)))
+  peaks_index <- sapply(which(shape < 0),
+                        FUN = function(i) {
+                          z <- i - thresh + 1
+                          z <- ifelse(z > 0, z, 1)
+                          w <- i + thresh + 1
+                          w <- ifelse(w < length(powerspec), w, length(powerspec))
+                          if (all(powerspec[c(z:i, (i + 2):w)] <= powerspec[i + 1])) {
+                            return(i + 1)
+                          } else {
+                            return(numeric(0))
+                          }
+                        })
+  peaks_index <- unlist(peaks_index)
+  return(peaks_index)
+}
+
+
+#factor function of make_signature(): return indices of frequencies at which power is at peak 
+#the number of peaks determines the length of indices of frequencies for each window
+make_peak_signature <- function(numPeak, powerspec) {
+  peak_index <- find_peak_indices(powerspec)
+  chosen_power <- sort(powerspec[peak_index], decreasing = TRUE)[1:numPeak]
+  freq_index <- match(chosen_power, powerspec)
+  return(freq_index)
+}
+
+###############################################
+#     main function for making signature      #
+###############################################
 song_signature <- function(file, numPeak = 10) { #song.signature() takes arguments of file name and the number of signatures drawn from each window
   song <- readWave(file)
-  length(song@left) / song@samp.rate
   songl <- song@left
   # each channel contains length(song@left) sample points, 
   # with duration of length(song@left)/song@samp.rate seconds 
@@ -18,61 +112,8 @@ song_signature <- function(file, numPeak = 10) { #song.signature() takes argumen
   step <- Fs # one spectral slice every 1s
   window <- 10 * Fs # 10s data window
   
-  fftn <- 2 ^ ceiling(log2(abs(window))) # next highest power of 2
-  
-  ##########################################
-  # windowing: use specgram() source code, #
-  # but changed a line of code inside,     #
-  # in order to prevent integer overflow   #
-  ##########################################
-  
-  specgram_new <- function(x, n = min(256, length(x)), Fs = 2, window = hanning(n), overlap = length(window) / 2)  {
-      ## if only the window length is given, generate hanning window
-      if (length(window) == 1)
-        window = hanning(window)
-      
-      ## should be extended to accept a vector of frequencies at which to
-      ## evaluate the fourier transform (via filterbank or chirp
-      ## z-transform)
-      if (length(n) > 1)
-        stop("specgram does not handle frequency vectors yet")
-      
-      ## compute window offsets
-      win_size = length(window)
-      if (win_size > n) {
-        n = win_size
-        warning("specgram fft size adjusted to", n)
-      }
-      step = win_size - overlap
-      
-      ## build matrix of windowed data slices
-      if (length(x) > win_size)
-        offset = seq(1, length(x) - win_size, by = step)
-      else
-        offset = 1
-      S = matrix(0, n, length(offset))
-      for (i in 1:length(offset)) {
-        S[1:win_size, i] = x[offset[i]:(offset[i] + win_size - 1)] * window
-      }
-      
-      ## compute fourier transform
-      S = mvfft(S)
-      
-      ## extract the positive frequency components
-      if (n %% 2 == 1)
-        ret_n = (n + 1) / 2
-      else
-        ret_n = n / 2
-      S = S[1:ret_n,]
-      
-      f = ((0:(ret_n - 1)) / n) * Fs   #fixed code, prevent integer overflow
-      t = offset / Fs
-      
-      res = list(S = S, f = f, t = t)
-      class(res) = "specgram"
-      res
-    }
-  
+  fftn <- 2 ^ ceiling(log2(window)) # next highest power of 2
+ 
   spg <- specgram_new(songl, n = fftn, Fs, window, window - step)
   #spg$S: complex output of the FFT, one row per slice.
   #spg$f:the frequency indices corresponding to the rows of S.
@@ -82,44 +123,10 @@ song_signature <- function(file, numPeak = 10) { #song.signature() takes argumen
   # local periodogram and signature #
   ###################################
   Periodogram <- abs(spg$S) ^ 2
-  
-  #normalize periodogram by the max element
-  normPower <- function(x) {
-    value <-  x / max(x)
-    return(value)
-  }
   Periodogram1 <- apply(Periodogram, 2, normPower) #normalized periodogram
   
   #normalize frequency by Nyquist frequency (half the sampling rate of the time series)
   normfreq <- spg$f / (song@samp.rate / 2)
-  
-  #factor function: find all the peaks along the periodogram and return the indices of peaks
-  find_peak_indices <- function(powerspec, thresh = 5){
-    shape <- diff(sign(diff(powerspec, na.pad = FALSE)))
-    peaks_index <- sapply(which(shape < 0),
-      FUN = function(i) {
-        z <- i - thresh + 1
-        z <- ifelse(z > 0, z, 1)
-        w <- i + thresh + 1
-        w <- ifelse(w < length(powerspec), w, length(powerspec))
-        if (all(powerspec[c(z:i, (i + 2):w)] <= powerspec[i + 1])) {
-          return(i + 1)
-        } else {
-          return(numeric(0))
-        }
-      })
-    peaks_index <- unlist(peaks_index)
-    return(peaks_index)
-  }
-   
-  #factor function: return indices of frequencies at which power is at peak 
-  #the number of peaks determines the length of indices of frequencies for each window
-  make_peak_signature <- function(numPeak, powerspec) {
-    peak_index <- find_peak_indices(powerspec)
-    chosen_power <- sort(powerspec[peak_index], decreasing = TRUE)[1:numPeak]
-    freq_index <- match(chosen_power, powerspec)
-    return(freq_index)
-  }
   
   #return signatures of song, which are the frequencies at which the powers are at peaks
   make_signature <- function(powerspec) { 
