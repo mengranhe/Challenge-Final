@@ -20,16 +20,16 @@ take_snippet <- function(start = 370, end = 380, song_data){
       stop("Recording snippet isn't long enough, matcher requires at least 10 seconds of snippet, try again")
     }
   }
-  snippet_data <- song_data[start:end, -c("song_id", "window")]
+  snippet_data <- song_data[start:end, -grep("^(song_id|window)", colnames(song_data))]
   snippet_songid <- song_data[start, 1]
   return(list(snippet_data = snippet_data, snippet_songid = snippet_songid))
 } 
 
 #factor function of match_signature(): make sure (song id, window) pair exists in song_data, exclude unmatching indices 
 generate_next_search_matrix <- function(match_index, search_matrix){ 
-  nextWinInfo <- search_matrix[match_index, c("song_id", "window")]
+  nextWinInfo <- search_matrix[match_index, grep("^(song_id|window)", colnames(search_matrix))]
   nextWinInfo[,"window"] <- nextWinInfo[,"window"]+1
-  nextWinInd <- match(data.frame(t(nextWinInfo)), data.frame(t(song_data[,c("song_id", "window")]))) #check id-window pair exists in song_data
+   nextWinInd <- match(data.frame(t(nextWinInfo)), data.frame(t(song_data[,grep("^(song_id|window)", colnames(song_data))]))) #check id-window pair exists in song_data
   nextWinInd <- nextWinInd[!is.na(nextWinInd)]
   return(nextWinInd)
 } 
@@ -38,8 +38,8 @@ generate_next_search_matrix <- function(match_index, search_matrix){
 match_signature <- function(snippet,threshold = 0.01, N = 2, song_data, search_matrix = song_data) { # N is the number of matches allowed to return
   frequency_id <- c()
   for (i in 1:nrow(snippet)) {
-    distance <- matrix(dist(rbind(snippet[i, ], search_matrix[, -c("song_id", "window")]), 
-                            method = "euclidean"))[1:nrow(search_matrix), 1]
+    distance <- matrix(dist(rbind(snippet[i, ], search_matrix[, -grep("^(song_id|window)", colnames(search_matrix))]), 
+                        method = "euclidean"))[1:nrow(search_matrix), 1]
     match_index <- which(distance <= threshold) #identify the indices where distance is less than threshold
     if(all(is.na(match_index))){
       return(NULL)
